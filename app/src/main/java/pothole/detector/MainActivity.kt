@@ -24,6 +24,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import pothole.detector.ui.theme.PotholeDetectorTheme
 import android.Manifest
 import android.content.pm.PackageManager
@@ -37,6 +39,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 import androidx.lifecycle.ViewModelProvider
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 
 class MainActivity : ComponentActivity() {
 
@@ -53,6 +57,12 @@ class MainActivity : ComponentActivity() {
             lifecycleScope.launch {
                 detectionService?.potholeCount?.collectLatest { count ->
                     viewModel.updatePotholeCount(count)
+                }
+                detectionService?.totalDistance?.collectLatest { distance ->
+                    viewModel.updateTotalDistance(distance)
+                }
+                detectionService?.smoothnessScore?.collectLatest { score ->
+                    viewModel.updateSmoothnessScore(score)
                 }
             }
         }
@@ -85,6 +95,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val requestLocationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            // Permission is granted.
+        } else {
+            // Explain to the user that the feature is unavailable.
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -98,14 +118,22 @@ class MainActivity : ComponentActivity() {
             ) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
+        }
 
-            if (ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.ACTIVITY_RECOGNITION
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                requestActivityRecognitionPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
-            }
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACTIVITY_RECOGNITION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestActivityRecognitionPermissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestLocationPermissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         }
 
         setContent {
@@ -115,10 +143,14 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val potholeCountState by viewModel.potholeCount.collectAsState()
+                    val totalDistanceState by viewModel.totalDistance.collectAsState()
+                    val smoothnessScoreState by viewModel.smoothnessScore.collectAsState()
                     val isDetectingState by viewModel.isDetecting.collectAsState()
 
                     PotholeDetectorApp(
                         potholeCount = potholeCountState,
+                        totalDistance = totalDistanceState,
+                        smoothnessScore = smoothnessScoreState,
                         isDetecting = isDetectingState,
                         onStartDetection = { startDetectionService() },
                         onStopDetection = { stopDetectionService() },
@@ -183,6 +215,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PotholeDetectorApp(
     potholeCount: Int,
+    totalDistance: Double,
+    smoothnessScore: Double,
     isDetecting: Boolean,
     onStartDetection: () -> Unit,
     onStopDetection: () -> Unit,
@@ -195,7 +229,8 @@ fun PotholeDetectorApp(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Top,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -228,6 +263,64 @@ fun PotholeDetectorApp(
                     )
                     Text(
                         text = "$potholeCount",
+                        style = MaterialTheme.typography.displayLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(120.dp),
+                shape = MaterialTheme.shapes.medium,
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Distance Traveled",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "%.2f km".format(totalDistance),
+                        style = MaterialTheme.typography.displayLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(120.dp),
+                shape = MaterialTheme.shapes.medium,
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Ride Smoothness Score",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "%.2f".format(smoothnessScore),
                         style = MaterialTheme.typography.displayLarge,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold
@@ -274,6 +367,6 @@ fun PotholeDetectorApp(
 @Composable
 fun PotholeDetectorPreview() {
     PotholeDetectorTheme {
-        PotholeDetectorApp(potholeCount = 0, isDetecting = false, onStartDetection = {}, onStopDetection = {}, onResetCount = {})
+        PotholeDetectorApp(potholeCount = 0, totalDistance = 0.0, smoothnessScore = 100.0, isDetecting = false, onStartDetection = {}, onStopDetection = {}, onResetCount = {})
     }
 }
