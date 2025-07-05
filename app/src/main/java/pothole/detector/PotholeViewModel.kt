@@ -3,10 +3,12 @@ package pothole.detector
 import androidx.lifecycle.ViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.content.Context
+import android.content.SharedPreferences
 
 import android.util.Log
 
-class PotholeViewModel : ViewModel() {
+class PotholeViewModel(private val context: Context) : ViewModel() {
 
     private val _potholeCount = MutableStateFlow(0)
     val potholeCount = _potholeCount.asStateFlow()
@@ -45,5 +47,43 @@ class PotholeViewModel : ViewModel() {
         _totalDistance.value = 0.0
         _smoothnessScore.value = 100.0
         Log.d("PotholeViewModel", "Count, distance, and score reset.")
+    }
+
+    private val sharedPreferences: SharedPreferences by lazy {
+        context.getSharedPreferences("PotholeDetectorScores", Context.MODE_PRIVATE)
+    }
+
+    private val _yourScore = MutableStateFlow(loadScore("your_score"))
+    val yourScore = _yourScore.asStateFlow()
+
+    private val _friendScore = MutableStateFlow(loadScore("friend_score"))
+    val friendScore = _friendScore.asStateFlow()
+
+    fun saveYourScore(score: Double) {
+        saveScore("your_score", score)
+        _yourScore.value = score
+    }
+
+    fun saveFriendScore(score: Double) {
+        saveScore("friend_score", score)
+        _friendScore.value = score
+    }
+
+    private fun saveScore(key: String, score: Double) {
+        sharedPreferences.edit().putFloat(key, score.toFloat()).apply()
+        Log.d("PotholeViewModel", "Saved $key: $score")
+    }
+
+    private fun loadScore(key: String): Double {
+        val score = sharedPreferences.getFloat(key, 0.0f).toDouble()
+        Log.d("PotholeViewModel", "Loaded $key: $score")
+        return score
+    }
+
+    fun clearScores() {
+        sharedPreferences.edit().clear().apply()
+        _yourScore.value = 0.0
+        _friendScore.value = 0.0
+        Log.d("PotholeViewModel", "All scores cleared.")
     }
 }

@@ -39,6 +39,16 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 import androidx.lifecycle.ViewModelProvider
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.navigation.NavController
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import pothole.detector.ui.faceoff.FaceOffScreen
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 
@@ -108,7 +118,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        viewModel = ViewModelProvider(this)[PotholeViewModel::class.java]
+        viewModel = ViewModelProvider(this, PotholeViewModelFactory(applicationContext))[PotholeViewModel::class.java]
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
@@ -147,15 +157,33 @@ class MainActivity : ComponentActivity() {
                     val smoothnessScoreState by viewModel.smoothnessScore.collectAsState()
                     val isDetectingState by viewModel.isDetecting.collectAsState()
 
-                    PotholeDetectorApp(
-                        potholeCount = potholeCountState,
-                        totalDistance = totalDistanceState,
-                        smoothnessScore = smoothnessScoreState,
-                        isDetecting = isDetectingState,
-                        onStartDetection = { startDetectionService() },
-                        onStopDetection = { stopDetectionService() },
-                        onResetCount = { resetCount() }
-                    )
+                    val navController = rememberNavController()
+
+                    NavHost(navController = navController, startDestination = "main_screen") {
+                        composable("main_screen") {
+                            PotholeDetectorApp(
+                                potholeCount = potholeCountState,
+                                totalDistance = totalDistanceState,
+                                smoothnessScore = smoothnessScoreState,
+                                isDetecting = isDetectingState,
+                                onStartDetection = { startDetectionService() },
+                                onStopDetection = { stopDetectionService() },
+                                onResetCount = { resetCount() },
+                                onNavigateToFaceOff = { navController.navigate("face_off_screen") }
+                            )
+                        }
+                        composable("face_off_screen") {
+                            FaceOffScreen(
+                                yourScore = viewModel.yourScore.collectAsState().value,
+                                friendScore = viewModel.friendScore.collectAsState().value,
+                                currentSmoothnessScore = smoothnessScoreState,
+                                onSaveYourScore = { score -> viewModel.saveYourScore(score) },
+                                onSaveFriendScore = { score -> viewModel.saveFriendScore(score) },
+                                onClearScores = { viewModel.clearScores() },
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -220,7 +248,8 @@ fun PotholeDetectorApp(
     isDetecting: Boolean,
     onStartDetection: () -> Unit,
     onStopDetection: () -> Unit,
-    onResetCount: () -> Unit
+    onResetCount: () -> Unit,
+    onNavigateToFaceOff: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -330,6 +359,17 @@ fun PotholeDetectorApp(
 
             Spacer(modifier = Modifier.height(32.dp))
 
+            Button(
+                onClick = onNavigateToFaceOff,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+            ) {
+                Text("Face Off!")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             if (isDetecting) {
                 Button(
                     onClick = onStopDetection,
@@ -367,6 +407,6 @@ fun PotholeDetectorApp(
 @Composable
 fun PotholeDetectorPreview() {
     PotholeDetectorTheme {
-        PotholeDetectorApp(potholeCount = 0, totalDistance = 0.0, smoothnessScore = 100.0, isDetecting = false, onStartDetection = {}, onStopDetection = {}, onResetCount = {})
+        PotholeDetectorApp(potholeCount = 0, totalDistance = 0.0, smoothnessScore = 100.0, isDetecting = false, onStartDetection = {}, onStopDetection = {}, onResetCount = {}, onNavigateToFaceOff = {})
     }
 }
