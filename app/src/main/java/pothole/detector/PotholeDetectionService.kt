@@ -49,8 +49,8 @@ class PotholeDetectionService : Service(), SensorEventListener {
     val smoothnessScore = _smoothnessScore.asStateFlow()
 
 
-    private val ACCEL_THRESHOLD = 25.0f // Adjust this threshold as needed
-    private val GYRO_THRESHOLD = 8.0f // Adjust this threshold as needed
+    private val ACCEL_THRESHOLD = 15.0f // Adjust this threshold as needed
+    private val GYRO_THRESHOLD = 5.0f // Adjust this threshold as needed
     private val DETECTION_COOLDOWN_MS = 1000L // Cooldown period to avoid multiple detections for one pothole
     private var lastDetectionTime = 0L
 
@@ -79,14 +79,16 @@ class PotholeDetectionService : Service(), SensorEventListener {
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                for (location in locationResult.locations) {
-                    if (lastLocation != null) {
-                        val distance = lastLocation!!.distanceTo(location) / 1000.0 // meters to kilometers
+                locationResult.lastLocation?.let { newLocation ->
+                    if (lastLocation == null) {
+                        lastLocation = newLocation
+                    } else {
+                        val distance = lastLocation!!.distanceTo(newLocation) / 1000.0 // meters to kilometers
                         _totalDistance.value += distance
                         Log.d("PotholeDetectionService", "Distance: $distance km, Total Distance: ${_totalDistance.value} km")
                         calculateSmoothnessScore()
+                        lastLocation = newLocation
                     }
-                    lastLocation = location
                 }
             }
         }
