@@ -1,14 +1,22 @@
 package pothole.detector
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.SharedPreferences
+import android.os.IBinder
+import android.util.Log
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import android.content.Context
-import android.content.SharedPreferences
+import kotlinx.coroutines.launch
 
-import android.util.Log
+class PotholeViewModel(private val context: Context) : ViewModel(), ServiceConnection {
 
-class PotholeViewModel(private val context: Context) : ViewModel() {
+    private var detectionService: PotholeDetectionService? = null
+    private var isBound = false
 
     private val _potholeCount = MutableStateFlow(0)
     val potholeCount = _potholeCount.asStateFlow()
@@ -22,33 +30,58 @@ class PotholeViewModel(private val context: Context) : ViewModel() {
     private val _isDetecting = MutableStateFlow(false)
     val isDetecting = _isDetecting.asStateFlow()
 
-    fun updatePotholeCount(count: Int) {
-        _potholeCount.value = count
-        Log.d("PotholeViewModel", "Pothole count updated to: $count")
+    init {
+        Intent(context, PotholeDetectionService::class.java).also { intent ->
+            context.bindService(intent, this, Context.BIND_AUTO_CREATE)
+        }
     }
 
-    fun updateTotalDistance(distance: Double) {
-        _totalDistance.value = distance
-        Log.d("PotholeViewModel", "Total distance updated to: $distance km")
+    override fun onServiceConnected(className: ComponentName, service: IBinder) {
+        val binder = service as PotholeDetectionService.LocalBinder
+        detectionService = binder.getService()
+        isBound = true
+        Log.d("PotholeViewModel", "Service connected")
+
+        viewModelScope.launch {
+            detectionService?.potholeCount?.collect { count ->
+                _potholeCount.value = count
+            }
+        }
+        viewModelScope.launch {
+            detectionService?.totalDistance?.collect { distance ->
+                _totalDistance.value = distance
+            }
+        }
+        viewModelScope.launch {
+            detectionService?.smoothnessScore?.collect { score ->
+                _smoothnessScore.value = score
+            }
+        }
     }
 
-    fun updateSmoothnessScore(score: Double) {
-        _smoothnessScore.value = score
-        Log.d("PotholeViewModel", "Smoothness score updated to: $score")
+    override fun onServiceDisconnected(arg0: ComponentName) {
+        isBound = false
+        detectionService = null
+        Log.d("PotholeViewModel", "Service disconnected")
     }
 
     fun updateIsDetecting(detecting: Boolean) {
         _isDetecting.value = detecting
-        Log.d("PotholeViewModel", "isDetecting updated to: $detecting")
     }
 
     fun resetCount() {
-        _potholeCount.value = 0
-        _totalDistance.value = 0.0
-        _smoothnessScore.value = 100.0
-        Log.d("PotholeViewModel", "Count, distance, and score reset.")
+        detectionService?.resetCount()
     }
 
+    override fun onCleared() {
+        if (isBound) {
+            context.unbindService(this)
+            isBound = false
+        }
+        super.onCleared()
+    }
+
+    // Face-off score logic
     private val sharedPreferences: SharedPreferences by lazy {
         context.getSharedPreferences("PotholeDetectorScores", Context.MODE_PRIVATE)
     }
@@ -71,19 +104,15 @@ class PotholeViewModel(private val context: Context) : ViewModel() {
 
     private fun saveScore(key: String, score: Double) {
         sharedPreferences.edit().putFloat(key, score.toFloat()).apply()
-        Log.d("PotholeViewModel", "Saved $key: $score")
     }
 
     private fun loadScore(key: String): Double {
-        val score = sharedPreferences.getFloat(key, 0.0f).toDouble()
-        Log.d("PotholeViewModel", "Loaded $key: $score")
-        return score
+        return sharedPreferences.getFloat(key, 0.0f).toDouble()
     }
 
     fun clearScores() {
         sharedPreferences.edit().clear().apply()
         _yourScore.value = 0.0
         _friendScore.value = 0.0
-        Log.d("PotholeViewModel", "All scores cleared.")
     }
 }

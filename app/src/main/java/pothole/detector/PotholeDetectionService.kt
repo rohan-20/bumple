@@ -87,6 +87,7 @@ class PotholeDetectionService : Service(), SensorEventListener {
                         _totalDistance.value += distance
                         Log.d("PotholeDetectionService", "Distance: $distance km, Total Distance: ${_totalDistance.value} km")
                         calculateSmoothnessScore()
+                        updateNotification()
                         lastLocation = newLocation
                     }
                 }
