@@ -1,10 +1,14 @@
 package pothole.detector
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,11 +38,25 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import pothole.detector.ui.faceoff.FaceOffScreen
+import pothole.detector.ui.potholelist.PotholeListScreen
 import pothole.detector.ui.theme.PotholeDetectorTheme
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: PotholeViewModel
+    private var isBound = false
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(className: ComponentName, service: IBinder) {
+            val binder = service as PotholeDetectionService.LocalBinder
+            viewModel.setService(binder.getService())
+            isBound = true
+        }
+
+        override fun onServiceDisconnected(arg0: ComponentName) {
+            isBound = false
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -83,6 +101,7 @@ class MainActivity : ComponentActivity() {
                     val totalDistanceState by viewModel.totalDistance.collectAsState()
                     val smoothnessScoreState by viewModel.smoothnessScore.collectAsState()
                     val isDetectingState by viewModel.isDetecting.collectAsState()
+                    val detectedPotholesState by viewModel.detectedPotholes.collectAsState()
 
                     val navController = rememberNavController()
 
@@ -94,9 +113,13 @@ class MainActivity : ComponentActivity() {
                                 smoothnessScore = smoothnessScoreState,
                                 isDetecting = isDetectingState,
                                 onStartDetection = { startDetectionService() },
-                                onStopDetection = { stopDetectionService() },
+                                onStopDetection = {
+                                    stopDetectionService()
+                                    navController.navigate("pothole_list_screen")
+                                },
                                 onResetCount = { viewModel.resetCount() },
-                                onNavigateToFaceOff = { navController.navigate("face_off_screen") }
+                                onNavigateToFaceOff = { navController.navigate("face_off_screen") },
+                                onNavigateToPotholeList = { navController.navigate("pothole_list_screen") }
                             )
                         }
                         composable("face_off_screen") {
@@ -110,9 +133,30 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navController.popBackStack() }
                             )
                         }
+                        composable("pothole_list_screen") {
+                            PotholeListScreen(
+                                potholes = detectedPotholesState,
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Intent(this, PotholeDetectionService::class.java).also { intent ->
+            bindService(intent, connection, Context.BIND_AUTO_CREATE)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (isBound) {
+            unbindService(connection)
+            isBound = false
         }
     }
 
@@ -125,6 +169,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun stopDetectionService() {
+        if (isBound) {
+            unbindService(connection)
+            isBound = false
+        }
         val serviceIntent = Intent(this, PotholeDetectionService::class.java).apply {
             action = PotholeDetectionService.ACTION_STOP_DETECTION
         }
@@ -142,7 +190,8 @@ fun PotholeDetectorApp(
     onStartDetection: () -> Unit,
     onStopDetection: () -> Unit,
     onResetCount: () -> Unit,
-    onNavigateToFaceOff: () -> Unit
+    onNavigateToFaceOff: () -> Unit,
+    onNavigateToPotholeList: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -291,6 +340,16 @@ fun PotholeDetectorApp(
                 ) {
                     Text("Reset Count")
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onNavigateToPotholeList,
+                    enabled = potholeCount > 0,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                ) {
+                    Text("View Detected Potholes")
+                }
             }
         }
     }
@@ -308,7 +367,8 @@ fun PotholeDetectorPreview() {
             onStartDetection = {},
             onStopDetection = {},
             onResetCount = {},
-            onNavigateToFaceOff = {}
+            onNavigateToFaceOff = {},
+            onNavigateToPotholeList = {}
         )
     }
 }

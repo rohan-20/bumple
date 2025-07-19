@@ -10,6 +10,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.Geocoder
 import android.os.Build
 import android.os.IBinder
 import android.os.VibrationEffect
@@ -29,6 +30,8 @@ import com.google.android.gms.location.Priority
 import android.location.Location
 import android.os.Looper
 import android.util.Log
+import pothole.detector.models.Pothole
+import java.util.Locale
 
 class PotholeDetectionService : Service(), SensorEventListener {
 
@@ -39,6 +42,7 @@ class PotholeDetectionService : Service(), SensorEventListener {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
     private var lastLocation: Location? = null
+    private lateinit var geocoder: Geocoder
 
     private val binder = LocalBinder()
     private val _potholeCount = MutableStateFlow(0)
@@ -47,6 +51,8 @@ class PotholeDetectionService : Service(), SensorEventListener {
     val totalDistance = _totalDistance.asStateFlow()
     private val _smoothnessScore = MutableStateFlow(100.0) // Initial score
     val smoothnessScore = _smoothnessScore.asStateFlow()
+    private val _detectedPotholes = MutableStateFlow<List<Pothole>>(emptyList())
+    val detectedPotholes = _detectedPotholes.asStateFlow()
 
 
     private val ACCEL_THRESHOLD = 15.0f // Adjust this threshold as needed
@@ -76,6 +82,7 @@ class PotholeDetectionService : Service(), SensorEventListener {
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        geocoder = Geocoder(this, Locale.getDefault())
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
@@ -130,6 +137,7 @@ class PotholeDetectionService : Service(), SensorEventListener {
         _potholeCount.value = 0
         _totalDistance.value = 0.0
         _smoothnessScore.value = 100.0
+        _detectedPotholes.value = emptyList()
         lastLocation = null
         updateNotification()
         sendCountUpdate()
@@ -176,6 +184,20 @@ class PotholeDetectionService : Service(), SensorEventListener {
         Log.d("PotholeDetectionService", "Smoothness Score: ${_smoothnessScore.value}")
     }
 
+    private fun getAddressFromLocation(location: Location): String {
+        return try {
+            val addresses = geocoder.getFromLocation(location.latitude, location.longitude, 1)
+            if (addresses != null && addresses.isNotEmpty()) {
+                addresses[0].getAddressLine(0)
+            } else {
+                "Address not found"
+            }
+        } catch (e: Exception) {
+            Log.e("PotholeDetectionService", "Error getting address: ${e.message}")
+            "Error getting address"
+        }
+    }
+
     override fun onSensorChanged(event: SensorEvent?) {
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastDetectionTime < DETECTION_COOLDOWN_MS) {
@@ -190,16 +212,7 @@ class PotholeDetectionService : Service(), SensorEventListener {
             val accelerationMagnitude = sqrt(x * x + y * y + z * z)
 
             if (accelerationMagnitude > ACCEL_THRESHOLD) {
-                _potholeCount.value++
-                calculateSmoothnessScore()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    vibrator.vibrate(200)
-                }
-                lastDetectionTime = currentTime
-                updateNotification()
-                sendCountUpdate()
+                handlePotholeDetection()
             }
         } else if (event?.sensor?.type == Sensor.TYPE_GYROSCOPE) {
             val x = event.values[0]
@@ -209,19 +222,30 @@ class PotholeDetectionService : Service(), SensorEventListener {
             val gyroMagnitude = sqrt(x * x + y * y + z * z)
 
             if (gyroMagnitude > GYRO_THRESHOLD) {
-                _potholeCount.value++
-                calculateSmoothnessScore()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    vibrator.vibrate(200)
-                }
-                lastDetectionTime = currentTime
-                updateNotification()
-                sendCountUpdate()
+                handlePotholeDetection()
             }
         }
     }
+
+    private fun handlePotholeDetection() {
+        val currentTime = System.currentTimeMillis()
+        lastLocation?.let {
+            val address = getAddressFromLocation(it)
+            val pothole = Pothole(it.latitude, it.longitude, address)
+            _detectedPotholes.value += pothole
+            _potholeCount.value++
+            calculateSmoothnessScore()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                vibrator.vibrate(200)
+            }
+            lastDetectionTime = currentTime
+            updateNotification()
+            sendCountUpdate()
+        }
+    }
+
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
         // Not used

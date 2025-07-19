@@ -1,22 +1,17 @@
 package pothole.detector
 
-import android.content.ComponentName
 import android.content.Context
-import android.content.Intent
-import android.content.ServiceConnection
 import android.content.SharedPreferences
-import android.os.IBinder
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import pothole.detector.models.Pothole
 
-class PotholeViewModel(private val context: Context) : ViewModel(), ServiceConnection {
+class PotholeViewModel(private val context: Context) : ViewModel() {
 
     private var detectionService: PotholeDetectionService? = null
-    private var isBound = false
 
     private val _potholeCount = MutableStateFlow(0)
     val potholeCount = _potholeCount.asStateFlow()
@@ -30,18 +25,11 @@ class PotholeViewModel(private val context: Context) : ViewModel(), ServiceConne
     private val _isDetecting = MutableStateFlow(false)
     val isDetecting = _isDetecting.asStateFlow()
 
-    init {
-        Intent(context, PotholeDetectionService::class.java).also { intent ->
-            context.bindService(intent, this, Context.BIND_AUTO_CREATE)
-        }
-    }
+    private val _detectedPotholes = MutableStateFlow<List<Pothole>>(emptyList())
+    val detectedPotholes = _detectedPotholes.asStateFlow()
 
-    override fun onServiceConnected(className: ComponentName, service: IBinder) {
-        val binder = service as PotholeDetectionService.LocalBinder
-        detectionService = binder.getService()
-        isBound = true
-        Log.d("PotholeViewModel", "Service connected")
-
+    fun setService(service: PotholeDetectionService) {
+        detectionService = service
         viewModelScope.launch {
             detectionService?.potholeCount?.collect { count ->
                 _potholeCount.value = count
@@ -57,12 +45,11 @@ class PotholeViewModel(private val context: Context) : ViewModel(), ServiceConne
                 _smoothnessScore.value = score
             }
         }
-    }
-
-    override fun onServiceDisconnected(arg0: ComponentName) {
-        isBound = false
-        detectionService = null
-        Log.d("PotholeViewModel", "Service disconnected")
+        viewModelScope.launch {
+            detectionService?.detectedPotholes?.collect { potholes ->
+                _detectedPotholes.value = potholes
+            }
+        }
     }
 
     fun updateIsDetecting(detecting: Boolean) {
@@ -71,14 +58,6 @@ class PotholeViewModel(private val context: Context) : ViewModel(), ServiceConne
 
     fun resetCount() {
         detectionService?.resetCount()
-    }
-
-    override fun onCleared() {
-        if (isBound) {
-            context.unbindService(this)
-            isBound = false
-        }
-        super.onCleared()
     }
 
     // Face-off score logic
